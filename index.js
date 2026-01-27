@@ -262,14 +262,15 @@ app.use(express.json());
 
 // 1. DATABASE CONNECTION
 const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.ktyl7lp.mongodb.net/safespot?retryWrites=true&w=majority";
-mongoose.connect(mongoURI).then(() => console.log("✅ DB Connected")).catch(err => console.log(err));
+mongoose.connect(mongoURI)
+  .then(() => console.log("✅ DB Connected"))
+  .catch(err => console.log("❌ DB Error:", err));
 
-// 2. SCHEMAS (Updated for Category 1 & 2)
+// 2. SCHEMAS
 const Protector = mongoose.model('Protector', new mongoose.Schema({
   userId: String, name: String, phone: String, photo: String
 }));
 
-// Define the Schema first
 const historySchema = new mongoose.Schema({
   userId: String,
   latitude: Number,
@@ -286,80 +287,84 @@ const historySchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now }
 });
 
-// Create the Model once
 const History = mongoose.model("History", historySchema);
-// 3. ANALYTICS ENGINE (Category 3, 4, & 5)
+
+// 3. ANALYTICS ENGINE (GET DATA)
 app.get('/api/analytics/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const startOfDay = new Date(); 
+    const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } });
+    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } }).sort({ timestamp: -1 });
 
-    // 1. Calculate Avg Speed FIRST (Fixes the initialization error)
+    // 3.1 Avg Speed
     const totalSpeed = logs.reduce((sum, log) => sum + (log.speed || 0), 0);
     const avgSpeedValue = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
 
-    // 2. Calculate Active Time
-    const activeMinutes = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2).length;
-    const activeTimeStr = activeMinutes < 60 
-      ? `${activeMinutes} mins` 
-      : `${(activeMinutes / 60).toFixed(1)} hrs`;
+    // 3.2 Active Time
+    const activeMinutes = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.1).length;
+    const activeTimeStr = activeMinutes < 60 ? `${activeMinutes} mins` : `${(activeMinutes / 60).toFixed(1)} hrs`;
 
-    // 3. Heatmap
-    // Inside app.get('/api/analytics/:userId')
-const heatmap = Array(24).fill(0);
+    // 3.3 Stability Index Calculation (Category 6.3)
+    let stabilityScore = 100;
+    if (logs.length > 2) {
+      const recentLogs = logs.slice(0, 10);
+      const totalRotation = recentLogs.reduce((sum, log) => 
+        sum + Math.abs(log.gyroX || 0) + Math.abs(log.gyroY || 0) + Math.abs(log.gyroZ || 0), 0);
+      
+      const avgRotation = totalRotation / recentLogs.length;
+      stabilityScore = Math.max(10, Math.min(100, 100 - (avgRotation * 30)));
+    }
 
-logs.forEach(log => {
-  const hour = new Date(log.timestamp).getHours();
-  // FIX: Count it if there is ANY speed or ANY motion detected
-  if (log.speed > 0.1 || log.intensity !== 'Idle') {
-    heatmap[hour] += 2; // Increment by 2 to make the bar grow faster
-  }
-});
+    // 3.4 Heatmap (Hourly)
+    const heatmap = Array(24).fill(0);
+    logs.forEach(log => {
+      const hour = new Date(log.timestamp).getHours();
+      if (log.speed > 0.1 || log.intensity !== 'Idle') heatmap[hour] += 2;
+    });
 
-    // 4. Send Response
     res.json({
       activeTime: activeTimeStr,
-      avgSpeed: `${avgSpeedValue} m/s`, // Use the new variable name here
+      avgSpeed: `${avgSpeedValue} m/s`,
       heatmap: heatmap,
+      currentIntensity: logs.length > 0 ? logs[0].intensity : 'Idle',
+      stabilityScore: Math.round(stabilityScore),
       timeline: logs.filter(l => l.isAbnormal).map(l => ({
         time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        title: "Irregular Movement",
+        title: l.speed > 3.5 ? "High Speed Alert" : "Irregular Movement",
         type: "High"
-      })).slice(-3)
+      })).slice(0, 3)
     });
-  } catch (err) { 
-    res.status(500).json({ error: err.message }); 
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
-// 4. DATA INGESTION (Category 1, 2, & 4)
+
+// 4. DATA INGESTION (POST DATA)
 app.post("/api/history", async (req, res) => {
   try {
-    // 1. EXTRACT ALL SENSOR DATA (Category 1.A)
     const { userId, latitude, longitude, speed, accelX, accelY, accelZ, gyroX, gyroY, gyroZ } = req.body;
 
-    // 2. FETCH PERSONAL BASELINE (Category 4.1)
+    // 4.1 Fetch Personal Baseline for Deviation Detection
     const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
+    weekAgo.setDate(weekAgo.setDate() - 7);
     const pastLogs = await History.find({ userId, timestamp: { $gte: weekAgo } });
     
-    // Calculate personal average speed baseline
     const avgSpeedBaseline = pastLogs.length > 0 
-      ? pastLogs.reduce((sum, log) => sum + (log.speed || 0), 0) / pastLogs.length 
-      : 1.2; // Default to 1.2 m/s if no history exists
+      ? (pastLogs.reduce((sum, log) => sum + (log.speed || 0), 0) / pastLogs.length) 
+      : 1.2;
 
-    // 3. CLASSIFICATION LOGIC (Category 2.2)
+    // 4.2 Classification Logic
+    const motionMag = Math.sqrt((accelX || 0)**2 + (accelY || 0)**2 + (accelZ || 0)**2);
     let intensity = 'Idle';
-    if (speed > 0.3) intensity = 'Light';
-    if (speed > 1.5) intensity = 'Moderate';
-    if (speed > 3.0) intensity = 'High-intensity';
+    if (motionMag > 0.5 || speed > 0.2) intensity = 'Light';
+    if (motionMag > 2.0 || speed > 1.5) intensity = 'Moderate';
+    if (motionMag > 4.5 || speed > 3.0) intensity = 'High-intensity';
 
-    // 4. DEVIATION DETECTION (Category 4.2)
-    // Flag if speed is 2x your normal baseline or if rotation is extreme
-    const rotationMagnitude = Math.sqrt((gyroX || 0)**2 + (gyroY || 0)**2 + (gyroZ || 0)**2);
-    const isAbnormal = (speed > (avgSpeedBaseline * 2) && speed > 2.5) || rotationMagnitude > 8;
+    // 4.3 Deviation Detection (Speed or Rotation magnitude)
+    const rotationMag = Math.sqrt((gyroX || 0)**2 + (gyroY || 0)**2 + (gyroZ || 0)**2);
+    const isAbnormal = (speed > (avgSpeedBaseline * 2.5) && speed > 2.0) || rotationMag > 7.0;
 
     const newHistory = new History({ 
       userId, latitude, longitude, speed, 
@@ -371,7 +376,7 @@ app.post("/api/history", async (req, res) => {
     await newHistory.save();
 
     if (isAbnormal) {
-      io.emit(`alert_${userId}`, { msg: "Abnormal movement pattern detected!" });
+      io.emit(`alert_${userId}`, { msg: "Abnormal movement detected!" });
     }
 
     res.status(200).json({ message: "Activity Analyzed", intensity, isAbnormal });
@@ -381,14 +386,21 @@ app.post("/api/history", async (req, res) => {
   }
 });
 
-// PRESERVED CONTACT ROUTES
+// 5. PROTECTOR ROUTES
 app.get('/api/protectors/:userId', async (req, res) => {
-  const userContacts = await Protector.find({ userId: req.params.userId });
-  res.json(userContacts);
+  try {
+    const userContacts = await Protector.find({ userId: req.params.userId });
+    res.json(userContacts);
+  } catch (err) { res.status(500).send(err); }
 });
+
 app.post('/api/protectors', async (req, res) => {
-  const newP = new Protector(req.body); await newP.save();
-  res.status(200).json({ message: "Saved" });
+  try {
+    const newP = new Protector(req.body); 
+    await newP.save();
+    res.status(200).json({ message: "Saved" });
+  } catch (err) { res.status(500).send(err); }
 });
+
 const port = process.env.PORT || 10000;
 server.listen(port, () => console.log(`🚀 Server on port ${port}`));
