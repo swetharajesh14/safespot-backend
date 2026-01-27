@@ -269,15 +269,25 @@ const Protector = mongoose.model('Protector', new mongoose.Schema({
   userId: String, name: String, phone: String, photo: String
 }));
 
-const History = mongoose.model("History", new mongoose.Schema({
+// Define the Schema first
+const historySchema = new mongoose.Schema({
   userId: String,
   latitude: Number,
   longitude: Number,
-  speed: { type: Number, default: 0 },         // Cat 2.3: Walking Speed
-  intensity: { type: String, default: 'Low' }, // Cat 2.2: Motion Intensity
-  isAbnormal: { type: Boolean, default: false }, // Cat 4.2: Deviation Detection
+  speed: { type: Number, default: 0 },
+  accelX: { type: Number, default: 0 }, 
+  accelY: { type: Number, default: 0 }, 
+  accelZ: { type: Number, default: 0 },
+  gyroX: { type: Number, default: 0 }, 
+  gyroY: { type: Number, default: 0 }, 
+  gyroZ: { type: Number, default: 0 },
+  intensity: { type: String, default: 'Idle' },
+  isAbnormal: { type: Boolean, default: false },
   timestamp: { type: Date, default: Date.now }
-}));
+});
+
+// Create the Model once
+const History = mongoose.model("History", historySchema);
 // 3. ANALYTICS ENGINE (Category 3, 4, & 5)
 app.get('/api/analytics/:userId', async (req, res) => {
   try {
@@ -324,27 +334,51 @@ logs.forEach(log => {
     res.status(500).json({ error: err.message }); 
   }
 });
-// 4. DATA INGESTION (Category 2.1 & 2.2)
+// 4. DATA INGESTION (Category 1, 2, & 4)
 app.post("/api/history", async (req, res) => {
   try {
-    const { userId, latitude, longitude, speed } = req.body;
+    // 1. EXTRACT ALL SENSOR DATA (Category 1.A)
+    const { userId, latitude, longitude, speed, accelX, accelY, accelZ, gyroX, gyroY, gyroZ } = req.body;
+
+    // 2. FETCH PERSONAL BASELINE (Category 4.1)
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const pastLogs = await History.find({ userId, timestamp: { $gte: weekAgo } });
     
-    // 2.2 Classification Logic
+    // Calculate personal average speed baseline
+    const avgSpeedBaseline = pastLogs.length > 0 
+      ? pastLogs.reduce((sum, log) => sum + (log.speed || 0), 0) / pastLogs.length 
+      : 1.2; // Default to 1.2 m/s if no history exists
+
+    // 3. CLASSIFICATION LOGIC (Category 2.2)
     let intensity = 'Idle';
     if (speed > 0.3) intensity = 'Light';
     if (speed > 1.5) intensity = 'Moderate';
     if (speed > 3.0) intensity = 'High-intensity';
 
-    // 4.2 Deviation Trigger (Simple version for now)
-    const isAbnormal = speed > 4.0; // Significant deviation from walking baseline
+    // 4. DEVIATION DETECTION (Category 4.2)
+    // Flag if speed is 2x your normal baseline or if rotation is extreme
+    const rotationMagnitude = Math.sqrt((gyroX || 0)**2 + (gyroY || 0)**2 + (gyroZ || 0)**2);
+    const isAbnormal = (speed > (avgSpeedBaseline * 2) && speed > 2.5) || rotationMagnitude > 8;
 
-    const newHistory = new History({ userId, latitude, longitude, speed, intensity, isAbnormal });
+    const newHistory = new History({ 
+      userId, latitude, longitude, speed, 
+      accelX, accelY, accelZ, 
+      gyroX, gyroY, gyroZ, 
+      intensity, isAbnormal 
+    });
+
     await newHistory.save();
 
-    if (isAbnormal) io.emit(`alert_${userId}`, { msg: "Abnormal movement detected!" });
+    if (isAbnormal) {
+      io.emit(`alert_${userId}`, { msg: "Abnormal movement pattern detected!" });
+    }
 
-    res.status(200).json({ message: "Activity Analyzed", intensity });
-  } catch (error) { res.status(500).json({ error: "Ingestion Failed" }); }
+    res.status(200).json({ message: "Activity Analyzed", intensity, isAbnormal });
+  } catch (error) { 
+    console.error("Ingestion Error:", error);
+    res.status(500).json({ error: "Ingestion Failed" }); 
+  }
 });
 
 // PRESERVED CONTACT ROUTES
