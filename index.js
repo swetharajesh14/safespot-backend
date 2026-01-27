@@ -73,9 +73,28 @@ io.on('connection', (socket) => {
 const port = process.env.PORT || 10000;
 server.listen(port, () => {
   console.log(`🚀 Server is running on port ${port}`);
-}); */
+}); 
+*/
 
-const express = require('express');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
@@ -220,4 +239,119 @@ io.on('connection', (socket) => {
 const port = process.env.PORT || 10000;
 server.listen(port, () => {
   console.log(`🚀 Server is running on port ${port}`);
+}); */
+
+
+
+
+
+
+
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const http = require('http');
+const { Server } = require("socket.io");
+
+const app = express();
+const server = http.createServer(app); 
+const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+
+app.use(cors());
+app.use(express.json());
+
+// 1. DATABASE CONNECTION
+const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.ktyl7lp.mongodb.net/safespot?retryWrites=true&w=majority";
+mongoose.connect(mongoURI).then(() => console.log("✅ DB Connected")).catch(err => console.log(err));
+
+// 2. SCHEMAS (Updated for Category 1 & 2)
+const Protector = mongoose.model('Protector', new mongoose.Schema({
+  userId: String, name: String, phone: String, photo: String
+}));
+
+const History = mongoose.model("History", new mongoose.Schema({
+  userId: String,
+  latitude: Number,
+  longitude: Number,
+  speed: { type: Number, default: 0 },         // Cat 2.3: Walking Speed
+  intensity: { type: String, default: 'Low' }, // Cat 2.2: Motion Intensity
+  isAbnormal: { type: Boolean, default: false }, // Cat 4.2: Deviation Detection
+  timestamp: { type: Date, default: Date.now }
+}));
+
+// 3. ANALYTICS ENGINE (Category 3, 4, & 5)
+app.get('/api/analytics/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+
+    // Fetch Today's Logs for Activity Rhythm (Cat 3.2)
+    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } }).sort({ timestamp: 1 });
+
+    // 2.3 Walking Speed Analysis
+    const totalSpeed = logs.reduce((sum, log) => sum + log.speed, 0);
+    const avgSpeed = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
+
+    // 3.2 Daily Activity Rhythm (Heatmap)
+    // We analyze the intensity of movement per hour (Cat 5.1)
+    const heatmap = Array(24).fill(0);
+    logs.forEach(log => {
+      const hour = new Date(log.timestamp).getHours();
+      // Increase intensity score based on speed (Cat 2.2)
+      if (log.speed > 0.5) heatmap[hour] += 1; 
+      if (log.speed > 2.5) heatmap[hour] += 2; 
+    });
+
+    // 4.2 Deviation Detection (Timeline)
+    const timeline = logs
+      .filter(log => log.isAbnormal)
+      .map(log => ({
+        time: new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        title: log.speed > 5 ? "High-Speed Deviation" : "Movement Irregularity",
+        type: log.speed > 5 ? "High" : "Medium" // Cat 4.2 Severity
+      }));
+
+    res.json({
+      activeTime: `${(logs.length / 60).toFixed(1)} hrs`, // Cat 2.1 Duration
+      avgSpeed: `${avgSpeed} m/s`,
+      heatmap: heatmap,
+      timeline: timeline.slice(-5)
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// 4. DATA INGESTION (Category 2.1 & 2.2)
+app.post("/api/history", async (req, res) => {
+  try {
+    const { userId, latitude, longitude, speed } = req.body;
+    
+    // 2.2 Classification Logic
+    let intensity = 'Idle';
+    if (speed > 0.3) intensity = 'Light';
+    if (speed > 1.5) intensity = 'Moderate';
+    if (speed > 3.0) intensity = 'High-intensity';
+
+    // 4.2 Deviation Trigger (Simple version for now)
+    const isAbnormal = speed > 4.0; // Significant deviation from walking baseline
+
+    const newHistory = new History({ userId, latitude, longitude, speed, intensity, isAbnormal });
+    await newHistory.save();
+
+    if (isAbnormal) io.emit(`alert_${userId}`, { msg: "Abnormal movement detected!" });
+
+    res.status(200).json({ message: "Activity Analyzed", intensity });
+  } catch (error) { res.status(500).json({ error: "Ingestion Failed" }); }
+});
+
+// PRESERVED CONTACT ROUTES
+app.get('/api/protectors/:userId', async (req, res) => {
+  const userContacts = await Protector.find({ userId: req.params.userId });
+  res.json(userContacts);
+});
+app.post('/api/protectors', async (req, res) => {
+  const newP = new Protector(req.body); await newP.save();
+  res.status(200).json({ message: "Saved" });
+});
+
+const port = process.env.PORT || 10000;
+server.listen(port, () => console.log(`🚀 Server on port ${port}`));
