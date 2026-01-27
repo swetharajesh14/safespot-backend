@@ -319,7 +319,6 @@ app.get('/api/analytics/:userId', async (req, res) => {
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 // 4. DATA INGESTION (Category 2.1 & 2.2)
 app.post("/api/history", async (req, res) => {
   try {
@@ -352,6 +351,5 @@ app.post('/api/protectors', async (req, res) => {
   const newP = new Protector(req.body); await newP.save();
   res.status(200).json({ message: "Saved" });
 });
-
 const port = process.env.PORT || 10000;
 server.listen(port, () => console.log(`🚀 Server on port ${port}`));
