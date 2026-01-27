@@ -128,6 +128,8 @@ app.delete('/api/protectors/:id', async (req, res) => {
   }
 });
 // 4. Start Server
-server.listen(3000, '0.0.0.0', () => {
-  console.log(`🚀 Server running on http://192.168.1.19:3000`);
+const port = process.env.PORT || 3000;
+
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
 });
