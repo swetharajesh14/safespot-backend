@@ -106,8 +106,7 @@ app.use(express.json());
 
 // 1. CLOUD CONNECTION
 // Replace <password> with your actual password for the user 'swetha'
-const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.xxxxx.mongodb.net/safespot?retryWrites=true&w=majority";
-
+mongoose.connect('mongodb+srv://swetha:SafeSpot2026@cluster0.abcde.mongodb.net/safespot?retryWrites=true&w=majority')
 mongoose.connect(mongoURI)
     .then(() => console.log("☁️  Connected to MongoDB Atlas (Cloud DB)"))
     .catch(err => console.error("❌ DB Connection Error:", err));
