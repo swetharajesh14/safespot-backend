@@ -296,26 +296,29 @@ app.get('/api/analytics/:userId', async (req, res) => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
+    // CRITICAL: Sort by timestamp -1 ensures the dashboard sees the latest shake
     const logs = await History.find({ userId, timestamp: { $gte: startOfDay } })
-                          .sort({ timestamp: -1 }); // -1 means newest first
+                              .sort({ timestamp: -1 });
 
     // 3.1 Avg Speed
     const totalSpeed = logs.reduce((sum, log) => sum + (log.speed || 0), 0);
     const avgSpeedValue = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
 
-    // 3.2 Active Time
+    // 3.2 Active Time (Logs count as minutes if not Idle)
     const activeMinutes = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.1).length;
     const activeTimeStr = activeMinutes < 60 ? `${activeMinutes} mins` : `${(activeMinutes / 60).toFixed(1)} hrs`;
 
-    // 3.3 Stability Index Calculation (Category 6.3)
+    // 3.3 Stability Index Calculation
     let stabilityScore = 100;
-    if (logs.length > 2) {
-      const recentLogs = logs.slice(0, 10);
+    if (logs.length > 0) {
+      // Look at the last 5 logs for a more responsive UI
+      const recentLogs = logs.slice(0, 5); 
       const totalRotation = recentLogs.reduce((sum, log) => 
         sum + Math.abs(log.gyroX || 0) + Math.abs(log.gyroY || 0) + Math.abs(log.gyroZ || 0), 0);
       
       const avgRotation = totalRotation / recentLogs.length;
-      stabilityScore = Math.max(10, Math.min(100, 100 - (avgRotation * 30)));
+      // Adjusted sensitivity so shakes visibly drop the score
+      stabilityScore = Math.max(10, Math.min(100, 100 - (avgRotation * 40)));
     }
 
     // 3.4 Heatmap (Hourly)
@@ -333,7 +336,7 @@ app.get('/api/analytics/:userId', async (req, res) => {
       stabilityScore: Math.round(stabilityScore),
       timeline: logs.filter(l => l.isAbnormal).map(l => ({
         time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        title: l.speed > 3.5 ? "High Speed Alert" : "Irregular Movement",
+        title: l.intensity === 'High-intensity' ? "Emergency Shake" : "Abnormal Movement",
         type: "High"
       })).slice(0, 3)
     });
@@ -347,37 +350,31 @@ app.post("/api/history", async (req, res) => {
   try {
     const { userId, latitude, longitude, speed, accelX, accelY, accelZ, gyroX, gyroY, gyroZ } = req.body;
 
-    // 4.1 Fetch Personal Baseline for Deviation Detection
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.setDate() - 7);
-    const pastLogs = await History.find({ userId, timestamp: { $gte: weekAgo } });
-    
-    const avgSpeedBaseline = pastLogs.length > 0 
-      ? (pastLogs.reduce((sum, log) => sum + (log.speed || 0), 0) / pastLogs.length) 
-      : 1.2;
-
-    // 4.2 Classification Logic
+    // 4.1 Classification Logic (Lowered thresholds for easier testing)
     const motionMag = Math.sqrt((accelX || 0)**2 + (accelY || 0)**2 + (accelZ || 0)**2);
+    
     let intensity = 'Idle';
-    if (motionMag > 0.5 || speed > 0.2) intensity = 'Light';
-    if (motionMag > 2.0 || speed > 1.5) intensity = 'Moderate';
-    if (motionMag > 4.5 || speed > 3.0) intensity = 'High-intensity';
+    if (motionMag > 1.2 || speed > 0.2) intensity = 'Light';
+    if (motionMag > 2.5 || speed > 1.5) intensity = 'Moderate';
+    if (motionMag > 4.0 || speed > 3.0) intensity = 'High-intensity';
 
-    // 4.3 Deviation Detection (Speed or Rotation magnitude)
+    // 4.2 Deviation Detection
     const rotationMag = Math.sqrt((gyroX || 0)**2 + (gyroY || 0)**2 + (gyroZ || 0)**2);
-    const isAbnormal = (speed > (avgSpeedBaseline * 2.5) && speed > 2.0) || rotationMag > 7.0;
+    const isAbnormal = motionMag > 4.5 || rotationMag > 6.0;
 
     const newHistory = new History({ 
       userId, latitude, longitude, speed, 
       accelX, accelY, accelZ, 
       gyroX, gyroY, gyroZ, 
-      intensity, isAbnormal 
+      intensity, isAbnormal,
+      timestamp: new Date() // Ensures timestamp is always current
     });
 
     await newHistory.save();
 
     if (isAbnormal) {
-      io.emit(`alert_${userId}`, { msg: "Abnormal movement detected!" });
+      io.emit(`alert_${userId}`, { msg: "Abnormal movement detected!", intensity });
+      console.log(`🚨 Alert Emitted for ${userId}`);
     }
 
     res.status(200).json({ message: "Activity Analyzed", intensity, isAbnormal });
@@ -402,17 +399,12 @@ app.post('/api/protectors', async (req, res) => {
     res.status(200).json({ message: "Saved" });
   } catch (err) { res.status(500).send(err); }
 });
-// DELETE a protector by ID
+
 app.delete('/api/protectors/:id', async (req, res) => {
   try {
-    const deletedProtector = await Protector.findByIdAndDelete(req.params.id);
-    if (!deletedProtector) {
-      return res.status(404).json({ message: "Protector not found" });
-    }
-    res.status(200).json({ message: "Protector deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    await Protector.findByIdAndDelete(req.params.id);
+    res.status(200).json({ message: "Deleted" });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 const port = process.env.PORT || 10000;
