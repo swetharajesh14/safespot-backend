@@ -296,7 +296,8 @@ app.get('/api/analytics/:userId', async (req, res) => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } }).sort({ timestamp: -1 });
+    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } })
+                          .sort({ timestamp: -1 }); // -1 means newest first
 
     // 3.1 Avg Speed
     const totalSpeed = logs.reduce((sum, log) => sum + (log.speed || 0), 0);
