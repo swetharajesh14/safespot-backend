@@ -401,6 +401,18 @@ app.post('/api/protectors', async (req, res) => {
     res.status(200).json({ message: "Saved" });
   } catch (err) { res.status(500).send(err); }
 });
+// DELETE a protector by ID
+app.delete('/api/protectors/:id', async (req, res) => {
+  try {
+    const deletedProtector = await Protector.findByIdAndDelete(req.params.id);
+    if (!deletedProtector) {
+      return res.status(404).json({ message: "Protector not found" });
+    }
+    res.status(200).json({ message: "Protector deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const port = process.env.PORT || 10000;
 server.listen(port, () => console.log(`🚀 Server on port ${port}`));
