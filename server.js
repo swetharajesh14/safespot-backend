@@ -95,92 +95,106 @@ app.get('/api/analytics/:userId', (req, res) => {
 app.listen(3000, '0.0.0.0', () => {
     console.log("🚀 SERVER RUNNING - Contacts & Analytics are separate and active!");
 }); */
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require("socket.io");
+
 const app = express();
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
 
 app.use(cors());
 app.use(express.json());
 
-// 1. CLOUD CONNECTION
-// Replace <password> with your actual password for the user 'swetha'
-mongoose.connect('mongodb+srv://swetha:SafeSpot2026@cluster0.abcde.mongodb.net/safespot?retryWrites=true&w=majority')
+// DATABASE CONNECTION
+// REPLACE 'YOUR_PASSWORD' with your actual MongoDB Atlas password
+const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.abcde.mongodb.net/safespot?retryWrites=true&w=majority";
+
 mongoose.connect(mongoURI)
-    .then(() => console.log("☁️  Connected to MongoDB Atlas (Cloud DB)"))
-    .catch(err => console.error("❌ DB Connection Error:", err));
+  .then(() => console.log("✅ DB Connected to Atlas"))
+  .catch(err => console.error("❌ DB Connection Error:", err));
 
-// 2. DATA SCHEMAS (Database Structure)
-const ContactSchema = new mongoose.Schema({
-    userId: String, name: String, phone: String, photo: String
+// --- SCHEMAS ---
+const protectorSchema = new mongoose.Schema({
+  userId: String,
+  name: String,
+  phone: String,
+  photo: String
 });
-const Contact = mongoose.model('Contact', ContactSchema);
 
-const HistorySchema = new mongoose.Schema({
-    userId: String,
-    latitude: Number,
-    longitude: Number,
-    speed: Number,
-    isAbnormal: Boolean,
-    timestamp: { type: Date, default: Date.now }
+const historySchema = new mongoose.Schema({
+  userId: String,
+  latitude: Number,
+  longitude: Number,
+  timestamp: { type: Date, default: Date.now }
 });
-const History = mongoose.model('History', HistorySchema);
 
-// 3. ROUTES
-// Save/Get Contacts (Emergency DB)
+const Protector = mongoose.model('Protector', protectorSchema);
+const History = mongoose.model("History", historySchema);
+
+// --- API ROUTES ---
+
+app.get('/', (req, res) => res.send('Server is Live and Running'));
+
+// SAVE PROTECTOR (Contact)
 app.post('/api/protectors', async (req, res) => {
-    try {
-        const contact = new Contact(req.body);
-        await contact.save();
-        res.status(201).json(contact);
-    } catch (e) { res.status(500).send(e); }
+  try {
+    console.log("📥 Received Protector Data:", req.body);
+    const { userId, name, phone, photo } = req.body;
+    
+    const newProtector = new Protector({ userId, name, phone, photo });
+    await newProtector.save();
+    
+    res.status(200).json({ message: "Contact Saved Successfully", data: newProtector });
+  } catch (err) {
+    console.error("❌ Save Protector Error:", err);
+    res.status(500).json({ error: "Failed to save contact", details: err.message });
+  }
 });
 
-app.get('/api/protectors/:userId', async (req, res) => {
-    const contacts = await Contact.find({ userId: req.params.userId });
-    res.json(contacts);
+// SAVE HISTORY (Location)
+app.post("/api/history", async (req, res) => {
+  try {
+    const { userId, latitude, longitude } = req.body;
+    const newHistory = new History({ userId, latitude, longitude });
+    await newHistory.save();
+    res.status(200).json({ message: "Activity saved" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to save activity" });
+  }
 });
 
-// 24/7 Movement Analytics
-app.post('/api/history', async (req, res) => {
-    try {
-        const { speed } = req.body;
-        // Logic: if speed > 3m/s, mark as abnormal movement
-        const log = new History({ ...req.body, isAbnormal: speed > 3.0 });
-        await log.save();
-        res.status(201).json(log);
-    } catch (e) { res.status(500).send(e); }
+// GET HISTORY
+app.get('/api/history/:userId', async (req, res) => {
+  try {
+    const history = await History.find({ userId: req.params.userId }).sort({ timestamp: -1 });
+    res.json(history);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/analytics/:userId', async (req, res) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+// DELETE PROTECTOR
+app.delete('/api/protectors/:id', async (req, res) => {
+  try {
+    const result = await Protector.findByIdAndDelete(req.params.id);
+    if (result) res.status(200).json({ message: "Deleted" });
+    else res.status(404).json({ message: "ID not found" });
+  } catch (err) { res.status(500).json(err); }
+});
 
-    const logs = await History.find({ 
-        userId: req.params.userId, 
-        timestamp: { $gte: today } 
-    });
-
-    const heatmap = Array(24).fill(0);
-    logs.forEach(l => heatmap[new Date(l.timestamp).getHours()]++);
-
-    res.json({
-        activeTime: `${(logs.length / 60).toFixed(1)} hrs`,
-        avgSpeed: logs.length > 0 ? (logs.reduce((s, l) => s + (l.speed || 0), 0) / logs.length).toFixed(2) : "0",
-        consistency: logs.length > 30 ? "Stable" : "Analyzing...",
-        abnormalCount: logs.filter(l => l.isAbnormal).length,
-        heatmap: heatmap,
-        timeline: logs.filter(l => l.isAbnormal).map(l => ({
-            time: l.timestamp.toLocaleTimeString(),
-            title: "Unusual Speed Spike",
-            type: "Medium"
-        }))
-    });
+// --- SOCKET LOGIC ---
+io.on('connection', (socket) => {
+  console.log('📡 Device Connected');
+  socket.on('update_location', (data) => {
+    io.emit('location_update', data);
+  });
 });
 
 const port = process.env.PORT || 3000;
-
-app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+server.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
 });
