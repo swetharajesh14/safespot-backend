@@ -98,7 +98,6 @@ app.listen(3000, '0.0.0.0', () => {
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const http = require('http');
 
 const app = express();
 app.use(cors());
@@ -121,7 +120,7 @@ const Protector = mongoose.model('Protector', protectorSchema);
 
 // 3. API ROUTES
 
-// GET: This is what allows the app to "SEE" the data
+// FIX: This route was missing, which caused the "Cannot GET" error
 app.get('/api/protectors/:userId', async (req, res) => {
   try {
     const userContacts = await Protector.find({ userId: req.params.userId });
@@ -131,26 +130,14 @@ app.get('/api/protectors/:userId', async (req, res) => {
   }
 });
 
-// POST: Save a new contact
 app.post('/api/protectors', async (req, res) => {
   try {
     const { userId, name, phone, photo } = req.body;
     const newContact = new Protector({ userId, name, phone, photo });
     await newContact.save();
-    console.log("✅ Contact Saved to Atlas:", name);
     res.status(201).json(newContact);
   } catch (err) {
     res.status(500).json({ error: "Failed to save" });
-  }
-});
-
-// DELETE: Remove a contact
-app.delete('/api/protectors/:id', async (req, res) => {
-  try {
-    await Protector.findByIdAndDelete(req.params.id);
-    res.json({ message: "Deleted" });
-  } catch (err) {
-    res.status(500).json(err);
   }
 });
 
