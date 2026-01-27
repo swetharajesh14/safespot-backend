@@ -290,11 +290,23 @@ app.get('/api/analytics/:userId', async (req, res) => {
     // Category 2.1: Count unique minutes of activity
     // We count any log that isn't 'Idle' as active time
     const activeLogs = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2);
-    const activeMinutes = activeLogs.length; // Approximate based on 1-min pings
-    const activeTimeStr = activeMinutes > 60 
-      ? `${(activeMinutes / 60).toFixed(1)} hrs` 
-      : `${activeMinutes} mins`;
+    // Calculate Active Time (Category 2.1)
+const activeMinutes = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2).length;
 
+let activeTimeDisplay;
+if (activeMinutes < 60) {
+    activeTimeDisplay = `${activeMinutes} mins`; // Show "5 mins" instead of "0.08 hrs"
+} else {
+    activeTimeDisplay = `${(activeMinutes / 60).toFixed(1)} hrs`;
+}
+
+// Send this back to the app
+res.json({
+  activeTime: activeTimeDisplay, 
+  avgSpeed: `${avgSpeed} m/s`,
+  heatmap: heatmap,
+  timeline: timelineData
+});
     // Category 2.3: Speed calculation
     const totalSpeed = logs.reduce((sum, log) => sum + (log.speed || 0), 0);
     const avgSpeed = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
