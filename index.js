@@ -285,37 +285,36 @@ app.get('/api/analytics/:userId', async (req, res) => {
     const { userId } = req.params;
     const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
 
-    // Fetch Today's Logs for Activity Rhythm (Cat 3.2)
-    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } }).sort({ timestamp: 1 });
+    const logs = await History.find({ userId, timestamp: { $gte: startOfDay } });
 
-    // 2.3 Walking Speed Analysis
-    const totalSpeed = logs.reduce((sum, log) => sum + log.speed, 0);
+    // Category 2.1: Count unique minutes of activity
+    // We count any log that isn't 'Idle' as active time
+    const activeLogs = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2);
+    const activeMinutes = activeLogs.length; // Approximate based on 1-min pings
+    const activeTimeStr = activeMinutes > 60 
+      ? `${(activeMinutes / 60).toFixed(1)} hrs` 
+      : `${activeMinutes} mins`;
+
+    // Category 2.3: Speed calculation
+    const totalSpeed = logs.reduce((sum, log) => sum + (log.speed || 0), 0);
     const avgSpeed = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
 
-    // 3.2 Daily Activity Rhythm (Heatmap)
-    // We analyze the intensity of movement per hour (Cat 5.1)
+    // Category 3.2: Heatmap
     const heatmap = Array(24).fill(0);
     logs.forEach(log => {
       const hour = new Date(log.timestamp).getHours();
-      // Increase intensity score based on speed (Cat 2.2)
-      if (log.speed > 0.5) heatmap[hour] += 1; 
-      if (log.speed > 2.5) heatmap[hour] += 2; 
+      if (log.intensity !== 'Idle') heatmap[hour] += 1;
     });
 
-    // 4.2 Deviation Detection (Timeline)
-    const timeline = logs
-      .filter(log => log.isAbnormal)
-      .map(log => ({
-        time: new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        title: log.speed > 5 ? "High-Speed Deviation" : "Movement Irregularity",
-        type: log.speed > 5 ? "High" : "Medium" // Cat 4.2 Severity
-      }));
-
     res.json({
-      activeTime: `${(logs.length / 60).toFixed(1)} hrs`, // Cat 2.1 Duration
+      activeTime: activeTimeStr,
       avgSpeed: `${avgSpeed} m/s`,
       heatmap: heatmap,
-      timeline: timeline.slice(-5)
+      timeline: logs.filter(l => l.isAbnormal).map(l => ({
+        time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        title: "Irregular Movement",
+        type: "High"
+      })).slice(-3)
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
