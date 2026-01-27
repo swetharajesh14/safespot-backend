@@ -99,101 +99,62 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
-const { Server } = require("socket.io");
 
 const app = express();
-const server = http.createServer(app);
-
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
-});
-
 app.use(cors());
 app.use(express.json());
 
-// DATABASE CONNECTION
-// REPLACE 'YOUR_PASSWORD' with your actual MongoDB Atlas password
-const mongoURI ="mongodb+srv://swetha:SafeSpot2026@cluster0.ktyl7lp.mongodb.net/?appName=Cluster";
+// 1. DATABASE CONNECTION
+const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.ktyl7lp.mongodb.net/safespot?retryWrites=true&w=majority";
 mongoose.connect(mongoURI)
   .then(() => console.log("✅ DB Connected to Atlas"))
   .catch(err => console.error("❌ DB Connection Error:", err));
 
-// --- SCHEMAS ---
+// 2. SCHEMAS
 const protectorSchema = new mongoose.Schema({
   userId: String,
   name: String,
   phone: String,
   photo: String
 });
+const Protector = mongoose.model('Protector', protectorSchema);
 
-const historySchema = new mongoose.Schema({
-  userId: String,
-  latitude: Number,
-  longitude: Number,
-  timestamp: { type: Date, default: Date.now }
+// 3. API ROUTES
+
+// GET: This is what allows the app to "SEE" the data
+app.get('/api/protectors/:userId', async (req, res) => {
+  try {
+    const userContacts = await Protector.find({ userId: req.params.userId });
+    res.json(userContacts); 
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-const Protector = mongoose.model('Protector', protectorSchema);
-const History = mongoose.model("History", historySchema);
-
-// --- API ROUTES ---
-
-app.get('/', (req, res) => res.send('Server is Live and Running'));
-
-// SAVE PROTECTOR (Contact)
+// POST: Save a new contact
 app.post('/api/protectors', async (req, res) => {
   try {
-    console.log("📥 Received Protector Data:", req.body);
     const { userId, name, phone, photo } = req.body;
-    
-    const newProtector = new Protector({ userId, name, phone, photo });
-    await newProtector.save();
-    
-    res.status(200).json({ message: "Contact Saved Successfully", data: newProtector });
+    const newContact = new Protector({ userId, name, phone, photo });
+    await newContact.save();
+    console.log("✅ Contact Saved to Atlas:", name);
+    res.status(201).json(newContact);
   } catch (err) {
-    console.error("❌ Save Protector Error:", err);
-    res.status(500).json({ error: "Failed to save contact", details: err.message });
+    res.status(500).json({ error: "Failed to save" });
   }
 });
 
-// SAVE HISTORY (Location)
-app.post("/api/history", async (req, res) => {
-  try {
-    const { userId, latitude, longitude } = req.body;
-    const newHistory = new History({ userId, latitude, longitude });
-    await newHistory.save();
-    res.status(200).json({ message: "Activity saved" });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to save activity" });
-  }
-});
-
-// GET HISTORY
-app.get('/api/history/:userId', async (req, res) => {
-  try {
-    const history = await History.find({ userId: req.params.userId }).sort({ timestamp: -1 });
-    res.json(history);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// DELETE PROTECTOR
+// DELETE: Remove a contact
 app.delete('/api/protectors/:id', async (req, res) => {
   try {
-    const result = await Protector.findByIdAndDelete(req.params.id);
-    if (result) res.status(200).json({ message: "Deleted" });
-    else res.status(404).json({ message: "ID not found" });
-  } catch (err) { res.status(500).json(err); }
-});
-
-// --- SOCKET LOGIC ---
-io.on('connection', (socket) => {
-  console.log('📡 Device Connected');
-  socket.on('update_location', (data) => {
-    io.emit('location_update', data);
-  });
+    await Protector.findByIdAndDelete(req.params.id);
+    res.json({ message: "Deleted" });
+  } catch (err) {
+    res.status(500).json(err);
+  }
 });
 
 const port = process.env.PORT || 3000;
-server.listen(port, () => {
+app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
