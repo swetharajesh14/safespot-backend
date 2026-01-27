@@ -20,7 +20,7 @@ app.use(express.json());
 
 // 2. FIXED: Replaced 127.0.0.1 with your Atlas Connection String
 // Replace PASSWORD with your NEW MongoDB Atlas password
-const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.abcde.mongodb.net/safespot?retryWrites=true&w=majority";
+const mongoURI ="mongodb+srv://swetha:SafeSpot2026@cluster0.ktyl7lp.mongodb.net/?appName=Cluster";
 
 mongoose.connect(mongoURI)
   .then(() => console.log("✅ DB Connected to Atlas"))
