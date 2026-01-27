@@ -298,11 +298,16 @@ app.get('/api/analytics/:userId', async (req, res) => {
       : `${(activeMinutes / 60).toFixed(1)} hrs`;
 
     // 3. Heatmap
-    const heatmap = Array(24).fill(0);
-    logs.forEach(log => {
-      const hour = new Date(log.timestamp).getHours();
-      if (log.intensity !== 'Idle') heatmap[hour] += 1;
-    });
+    // Inside app.get('/api/analytics/:userId')
+const heatmap = Array(24).fill(0);
+
+logs.forEach(log => {
+  const hour = new Date(log.timestamp).getHours();
+  // FIX: Count it if there is ANY speed or ANY motion detected
+  if (log.speed > 0.1 || log.intensity !== 'Idle') {
+    heatmap[hour] += 2; // Increment by 2 to make the bar grow faster
+  }
+});
 
     // 4. Send Response
     res.json({
