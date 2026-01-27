@@ -94,7 +94,10 @@ app.get('/api/analytics/:userId', (req, res) => {
 
 app.listen(3000, '0.0.0.0', () => {
     console.log("🚀 SERVER RUNNING - Contacts & Analytics are separate and active!");
-}); */
+});      
+
+
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -145,3 +148,7 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
+
+
+
+*/
