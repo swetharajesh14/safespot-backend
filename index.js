@@ -2,42 +2,49 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
-const { Server } = require("socket.io"); // 1. Missing Import
+const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app); 
 
-// 2. Initialize Socket.io
+// 1. Updated Socket.io to use the server instance
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allows your phone to connect
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
 
 app.use(cors());
 app.use(express.json());
-const HistorySchema = new mongoose.Schema({
+
+// 2. FIXED: Replaced 127.0.0.1 with your Atlas Connection String
+// Replace PASSWORD with your NEW MongoDB Atlas password
+const mongoURI = "mongodb+srv://swetha:SafeSpot2026@cluster0.abcde.mongodb.net/safespot?retryWrites=true&w=majority";
+
+mongoose.connect(mongoURI)
+  .then(() => console.log("✅ DB Connected to Atlas"))
+  .catch(err => console.error("❌ DB Connection Error:", err));
+
+// Schemas
+const Protector = mongoose.model('Protector', new mongoose.Schema({
+  userId: String, name: String, phone: String, photo: String
+}));
+
+const History = mongoose.model("History", new mongoose.Schema({
   userId: String,
   latitude: Number,
   longitude: Number,
   timestamp: { type: Date, default: Date.now }
-});
+}));
 
+// Routes
+app.get('/', (req, res) => res.send('Server Active and Live'));
 
-// POST route to save history
-// Post location history
 app.post("/api/history", async (req, res) => {
   try {
     const { userId, latitude, longitude } = req.body;
-    
-    // Inga thaan namma "New" entry create panrom
-    const newHistory = new History({
-      userId,
-      latitude,
-      longitude
-    });
-
+    const newHistory = new History({ userId, latitude, longitude });
     await newHistory.save();
     console.log("Activity Saved for:", userId);
     res.status(200).json({ message: "Activity saved successfully" });
@@ -46,26 +53,6 @@ app.post("/api/history", async (req, res) => {
     res.status(500).json({ error: "Failed to save activity" });
   }
 });
-
-// MongoDB Connection
-const mongoURI = "mongodb://127.0.0.1:27017/safespot";
-mongoose.connect(mongoURI).then(() => console.log("✅ DB Connected"));
-
-const Protector = mongoose.model('Protector', new mongoose.Schema({
-  userId: String, name: String, phone: String, photo: String
-}));
-// History Schema
-const historySchema = new mongoose.Schema({
-  userId: String,
-  latitude: Number,
-  longitude: Number,
-  timestamp: { type: Date, default: Date.now }
-});
-
-const History = mongoose.model("History", historySchema);
-
-// API Routes
-app.get('/', (req, res) => res.send('Server Active'));
 
 app.post('/api/protectors', async (req, res) => {
   try {
@@ -77,59 +64,32 @@ app.post('/api/protectors', async (req, res) => {
 
 app.get('/api/history/:userId', async (req, res) => {
   try {
-    // find() nu irunthalthaan ella data-vum varum
     const history = await History.find({ userId: req.params.userId }).sort({ timestamp: -1 });
     res.json(history);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 3. SOCKET LOGIC
-io.on('connection', (socket) => {
-  console.log('📡 New Device Connected to Socket');
-
-  socket.on('update_location', (data) => {
-    console.log(`📍 Location from ${data.name}:`, data.latitude, data.longitude);
-    
-    // This sends the data to your map.tsx listener
-    // We use a general event name to make it easier for the demo
-    io.emit('location_update', data); 
-    
-    // Also keeping your specific one just in case
-    io.emit(`guardian_view_${data.userId}`, data);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ Device disconnected');
-  });
-});
-// API: Remove Protector
-// API: Remove Protector
-// index.js (Backend)
 app.delete('/api/protectors/:id', async (req, res) => {
   try {
-    const idToDelete = req.params.id;
-    console.log("Attempting to delete ID from DB:", idToDelete);
-
-    // This is the critical line
-    const result = await Protector.findByIdAndDelete(idToDelete);
-
-    if (result) {
-      console.log("✅ Successfully removed from MongoDB");
-      res.status(200).json({ message: "Deleted" });
-    } else {
-      console.log("❌ ID not found in MongoDB");
-      res.status(404).json({ message: "ID not found" });
-    }
-  } catch (err) {
-    console.error("Database Error:", err);
-    res.status(500).json(err);
-  }
+    const result = await Protector.findByIdAndDelete(req.params.id);
+    if (result) res.status(200).json({ message: "Deleted" });
+    else res.status(404).json({ message: "ID not found" });
+  } catch (err) { res.status(500).json(err); }
 });
-// 4. Start Server
-const port = process.env.PORT || 3000;
 
-app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+// Socket Logic
+io.on('connection', (socket) => {
+  console.log('📡 New Device Connected to Socket');
+  socket.on('update_location', (data) => {
+    console.log(`📍 Location from ${data.name}:`, data.latitude, data.longitude);
+    io.emit('location_update', data); 
+    io.emit(`guardian_view_${data.userId}`, data);
+  });
+  socket.on('disconnect', () => console.log('❌ Device disconnected'));
+});
+
+// 3. FIXED: server.listen instead of app.listen (Required for Socket.io)
+const port = process.env.PORT || 3000;
+server.listen(port, () => {
+    console.log(`🚀 Server is running on port ${port}`);
 });
