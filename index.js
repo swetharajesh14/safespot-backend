@@ -278,49 +278,36 @@ const History = mongoose.model("History", new mongoose.Schema({
   isAbnormal: { type: Boolean, default: false }, // Cat 4.2: Deviation Detection
   timestamp: { type: Date, default: Date.now }
 }));
-
 // 3. ANALYTICS ENGINE (Category 3, 4, & 5)
 app.get('/api/analytics/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const startOfDay = new Date(); 
+    startOfDay.setHours(0, 0, 0, 0);
 
     const logs = await History.find({ userId, timestamp: { $gte: startOfDay } });
 
-    // Category 2.1: Count unique minutes of activity
-    // We count any log that isn't 'Idle' as active time
-    const activeLogs = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2);
-    // Calculate Active Time (Category 2.1)
-const activeMinutes = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2).length;
-
-let activeTimeDisplay;
-if (activeMinutes < 60) {
-    activeTimeDisplay = `${activeMinutes} mins`; // Show "5 mins" instead of "0.08 hrs"
-} else {
-    activeTimeDisplay = `${(activeMinutes / 60).toFixed(1)} hrs`;
-}
-
-// Send this back to the app
-res.json({
-  activeTime: activeTimeDisplay, 
-  avgSpeed: `${avgSpeed} m/s`,
-  heatmap: heatmap,
-  timeline: timelineData
-});
-    // Category 2.3: Speed calculation
+    // 1. Calculate Avg Speed FIRST (Fixes the initialization error)
     const totalSpeed = logs.reduce((sum, log) => sum + (log.speed || 0), 0);
-    const avgSpeed = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
+    const avgSpeedValue = logs.length > 0 ? (totalSpeed / logs.length).toFixed(2) : "0.00";
 
-    // Category 3.2: Heatmap
+    // 2. Calculate Active Time
+    const activeMinutes = logs.filter(log => log.intensity !== 'Idle' || log.speed > 0.2).length;
+    const activeTimeStr = activeMinutes < 60 
+      ? `${activeMinutes} mins` 
+      : `${(activeMinutes / 60).toFixed(1)} hrs`;
+
+    // 3. Heatmap
     const heatmap = Array(24).fill(0);
     logs.forEach(log => {
       const hour = new Date(log.timestamp).getHours();
       if (log.intensity !== 'Idle') heatmap[hour] += 1;
     });
 
+    // 4. Send Response
     res.json({
       activeTime: activeTimeStr,
-      avgSpeed: `${avgSpeed} m/s`,
+      avgSpeed: `${avgSpeedValue} m/s`, // Use the new variable name here
       heatmap: heatmap,
       timeline: logs.filter(l => l.isAbnormal).map(l => ({
         time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -328,7 +315,9 @@ res.json({
         type: "High"
       })).slice(-3)
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
 });
 // 4. DATA INGESTION (Category 2.1 & 2.2)
 app.post("/api/history", async (req, res) => {
