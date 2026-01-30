@@ -12,11 +12,10 @@ app.use(cors());
 app.use(express.json());
 
 // 1. DATABASE CONNECTION
-// Using the long string to bypass local DNS/Whitelist flickering
 const mongoURI = "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
 
 const connectWithRetry = () => {
-  mongoose.connect(mongoURI, { family: 4 }) // family: 4 forces IPv4
+  mongoose.connect(mongoURI, { family: 4, serverSelectionTimeoutMS: 5000 })
     .then(() => console.log("✅ DB Connected Successfully!"))
     .catch(err => {
       console.log("❌ DB Error:", err.message);
@@ -26,80 +25,111 @@ const connectWithRetry = () => {
 connectWithRetry();
 
 // 2. SCHEMAS
-const Protector = mongoose.model('Protector', new mongoose.Schema({
-  userId: String, 
-  name: String, 
-  phone: String, 
+const ProtectorSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  name: { type: String, required: true },
+  phone: { type: String, required: true },
   photo: String
-}));
+});
+const Protector = mongoose.model('Protector', ProtectorSchema);
 
-const History = mongoose.model("History", new mongoose.Schema({
+const HistorySchema = new mongoose.Schema({
   userId: String,
   latitude: Number,
   longitude: Number,
   speed: { type: Number, default: 0 },
+  accelX: Number, accelY: Number, accelZ: Number,
+  gyroX: Number, gyroY: Number, gyroZ: Number,
   intensity: { type: String, default: 'Idle' },
   isAbnormal: { type: Boolean, default: false },
   timestamp: { type: Date, default: Date.now }
-}));
+});
+const History = mongoose.model("History", HistorySchema);
 
 // 3. ROUTES
 
-// --- ROOT ROUTE (Fixes "Cannot GET /") ---
+// ROOT CHECK
 app.get('/', (req, res) => {
-  res.send('<h1>✅ SafeSpot Backend is Live!</h1><p>Database is connected and API is ready.</p>');
+  res.send('<h1>✅ SafeSpot Backend is Fully Operational!</h1>');
 });
 
-// --- PROTECTOR / CONTACT ROUTES ---
+// --- PROTECTOR (CONTACTS) SECTION ---
 
-// GET: Fetch all contacts for a specific user
-app.get('/api/protectors/:userId', async (req, res) => {
-  try {
-    const userContacts = await Protector.find({ userId: req.params.userId });
-    res.json(userContacts);
-  } catch (err) { 
-    res.status(500).json({ error: "Failed to fetch contacts" }); 
-  }
-});
-
-// POST: Add a new contact
+// ADD CONTACT
 app.post('/api/protectors', async (req, res) => {
   try {
     const { userId, name, phone, photo } = req.body;
-    if (!userId || !name || !phone) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-    const newP = new Protector({ userId, name, phone, photo }); 
-    await newP.save();
-    res.status(200).json({ message: "Contact Saved Successfully", contact: newP });
-  } catch (err) { 
-    res.status(500).json({ error: "Failed to save contact" }); 
+    const newContact = new Protector({ userId, name, phone, photo });
+    await newContact.save();
+    console.log(`👤 Contact Saved: ${name} for User: ${userId}`);
+    res.status(200).json({ success: true, message: "Contact saved successfully!", data: newContact });
+  } catch (err) {
+    console.error("Save Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// DELETE: Remove a contact by its ID
+// GET CONTACTS
+app.get('/api/protectors/:userId', async (req, res) => {
+  try {
+    const contacts = await Protector.find({ userId: req.params.userId });
+    res.json(contacts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE CONTACT
 app.delete('/api/protectors/:id', async (req, res) => {
   try {
-    const deleted = await Protector.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ error: "Contact not found" });
-    res.status(200).json({ message: "Contact Deleted Successfully" });
-  } catch (err) { 
-    res.status(500).json({ error: "Failed to delete contact" }); 
+    const result = await Protector.findByIdAndDelete(req.params.id);
+    if (result) {
+      console.log(`🗑️ Contact Deleted: ${req.params.id}`);
+      res.status(200).json({ success: true, message: "Contact deleted successfully!" });
+    } else {
+      res.status(404).json({ success: false, message: "Contact not found" });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// --- HISTORY / ANALYTICS ROUTES ---
+// --- ANALYTICS & HISTORY SECTION ---
+
 app.post("/api/history", async (req, res) => {
   try {
-    const newHistory = new History(req.body);
-    await newHistory.save();
-    res.status(200).json({ message: "Activity Logged" });
-  } catch (error) { 
-    res.status(500).json({ error: "Ingestion Failed" }); 
+    const data = req.body;
+    // Logic for intensity
+    const motionMag = Math.sqrt((data.accelX || 0)**2 + (data.accelY || 0)**2 + (data.accelZ || 0)**2);
+    let intensity = 'Idle';
+    if (motionMag > 1.2) intensity = 'Light';
+    if (motionMag > 2.5) intensity = 'Moderate';
+    if (motionMag > 4.0) intensity = 'High-intensity';
+
+    const isAbnormal = motionMag > 4.5;
+    
+    const log = new History({ ...data, intensity, isAbnormal });
+    await log.save();
+
+    if (isAbnormal) {
+      io.emit(`alert_${data.userId}`, { msg: "Abnormal movement!", intensity });
+    }
+    res.status(200).json({ intensity, isAbnormal });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 4. START SERVER
+app.get('/api/analytics/:userId', async (req, res) => {
+    try {
+        const logs = await History.find({ userId: req.params.userId }).sort({ timestamp: -1 }).limit(50);
+        res.json(logs);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 4. START
 const port = process.env.PORT || 10000;
 server.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
