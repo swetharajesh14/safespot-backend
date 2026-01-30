@@ -14,16 +14,19 @@ app.use(express.json());
 // 1. DATABASE CONNECTION
 const mongoURI = "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
 
-const connectWithRetry = () => {
-  mongoose.connect(mongoURI, { family: 4, serverSelectionTimeoutMS: 5000 })
-    .then(() => console.log("✅ DB Connected Successfully!"))
-    .catch(err => {
-      console.log("❌ DB Error:", err.message);
-      setTimeout(connectWithRetry, 5000);
-    });
-};
-connectWithRetry();
 
+// Replace your connectWithRetry with this:
+const connectDB = async () => {
+  if (mongoose.connection.readyState >= 1) return; // Don't connect if already connected
+  try {
+    await mongoose.connect(mongoURI, { family: 4 });
+    console.log("✅ DB Connected Successfully!");
+  } catch (err) {
+    console.log("❌ DB Error:", err.message);
+    setTimeout(connectDB, 5000);
+  }
+};
+connectDB();
 // 2. SCHEMAS
 const Protector = mongoose.model('Protector', new mongoose.Schema({
   userId: { type: String, required: true },
