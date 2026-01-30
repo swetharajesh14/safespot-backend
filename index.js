@@ -23,7 +23,7 @@ app.use(express.json());
   .catch(err => console.log("❌ DB Error:", err.message));*/
 
 // 1. DEFINE the function first
-const mongoURI = process.env.MONGODB_URI;
+const mongoURI = "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
 
 const connectWithRetry = () => {
   // Only call connect here!
