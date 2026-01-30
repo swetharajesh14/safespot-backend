@@ -15,28 +15,27 @@ app.use(express.json());
 // Using the Direct Shard connection string to bypass DNS SRV issues
 // REPLACE your current mongoURI with this exact string:
 // Replace the entire mongoURI line with this:
-const mongoURI = "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
+//const mongoURI = "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
 
 // In your mongoose.connect, add the 'family: 4' option:
-mongoose.connect(mongoURI, { family: 4 })
+/*mongoose.connect(mongoURI, { family: 4 })
   .then(() => console.log("✅ DB Connected Successfully!"))
-  .catch(err => console.log("❌ DB Error:", err.message));
+  .catch(err => console.log("❌ DB Error:", err.message));*/
 
 // 1. DEFINE the function first
+const mongoURI = process.env.MONGODB_URI;
+
 const connectWithRetry = () => {
-  console.log('⏳ Attempting to connect to MongoDB Atlas...');
-  
-  // Direct Shard String to bypass DNS/Whitelist loops
-const mongoURI = process.env.MONGODB_URI || "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
-mongoose.connect(mongoURI, { 
-  family: 4, // Forces the connection to use IPv4
-  serverSelectionTimeoutMS: 5000 
-})
+  // Only call connect here!
+  mongoose.connect(mongoURI)
+    .then(() => console.log("✅ DB Connected Successfully!"))
+    .catch(err => {
+      console.log("❌ DB Error:", err.message);
+      setTimeout(connectWithRetry, 5000);
+    });
 };
 
-// 2. NOW call it
 connectWithRetry();
-
 // 2. SCHEMAS
 const Protector = mongoose.model('Protector', new mongoose.Schema({
   userId: String, 
