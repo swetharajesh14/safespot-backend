@@ -16,8 +16,12 @@ app.use(express.json());
 
 // NEW FRESH URI
 // A simplified direct connection to one shard
- const mongoURI= "mongodb://admin_user:SafeSpot123@cluster0.ktyl7lp.mongodb.net/?appName=Cluster0";
+ // Clean string for cloud deployment
+const mongoURI = "mongodb+srv://admin_user:SafeSpot123@cluster0.ktyl7lp.mongodb.net/safespot?retryWrites=true&w=majority";
 
+mongoose.connect(mongoURI)
+  .then(() => console.log("✅ Render connected to Atlas successfully!"))
+  .catch(err => console.log("❌ Render failed to connect:", err));
 const connectDB = async () => {
   console.log("🚀 Step 1: Initiating connection request...");
   try {
