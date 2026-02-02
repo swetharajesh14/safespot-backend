@@ -1,3 +1,4 @@
+require('node:dns').setServers(['8.8.8.8', '8.8.4.4']); // Force Google DNS
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -17,7 +18,8 @@ app.use(express.json());
 // NEW FRESH URI
 // A simplified direct connection to one shard
  // Clean string for cloud deployment
-const mongoURI = "mongodb+srv://admin_user:SafeSpot123@cluster0.ktyl7lp.mongodb.net/safespot?retryWrites=true&w=majority";
+// This string bypasses the DNS SRV record by pointing directly to the cluster shards
+const mongoURI = "mongodb://admin_user:SafeSpot123@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
 
 mongoose.connect(mongoURI)
   .then(() => console.log("✅ Render connected to Atlas successfully!"))
