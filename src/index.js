@@ -5,19 +5,28 @@ import { connectDB } from "./config/db.js";
 
 import userRoutes from "./routes/user.routes.js";
 import protectorsRoutes from "./routes/protectors.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 
 dotenv.config();
 
 const app = express();
 
+// middlewares
 app.use(cors());
 app.use(express.json());
 
-// ✅ Only ONE place connects to MongoDB
+// db
 connectDB();
 
+// routes
 app.use("/api/user", userRoutes);
 app.use("/api/protectors", protectorsRoutes);
+app.use("/api/upload", uploadRoutes);
+
+// health check
+app.get("/", (req, res) => {
+  res.send("SafeSpot backend is running ✅");
+});
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
