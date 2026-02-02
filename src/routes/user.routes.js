@@ -4,41 +4,42 @@ import User from "../models/User.js";
 const router = express.Router();
 
 /**
- * GET /api/user/:userId
- * Returns profile. If not exists, auto-creates (so app always gets data).
+ * GET user profile
  */
 router.get("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    let user = await User.findOne({ userId });
+    const user = await User.findOne({ userId });
+
     if (!user) {
-      user = await User.create({ userId, name: userId }); // minimal seed
+      return res.status(404).json({ message: "User not found" });
     }
 
     res.json(user);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("❌ Fetch user error:", err);
+    res.status(500).json({ message: err.message });
   }
 });
 
 /**
- * PUT /api/user/:userId
- * Updates profile fields.
+ * UPDATE / CREATE user profile
  */
 router.put("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const updated = await User.findOneAndUpdate(
+    const updatedUser = await User.findOneAndUpdate(
       { userId },
       { $set: req.body },
       { new: true, upsert: true }
     );
 
-    res.json(updated);
+    res.json(updatedUser);
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("❌ Save user error:", err);
+    res.status(500).json({ message: err.message });
   }
 });
 
