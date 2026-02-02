@@ -19,8 +19,7 @@ app.use(express.json());
 // A simplified direct connection to one shard
  // Clean string for cloud deployment
 // This string bypasses the DNS SRV record by pointing directly to the cluster shards
-const mongoURI = "mongodb://admin_user:SafeSpot123@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
-
+const mongoURI = "mongodb://admin_user:SafeSpot123@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017/safespot?ssl=true&authSource=admin&directConnection=true";
 mongoose.connect(mongoURI)
   .then(() => console.log("✅ Render connected to Atlas successfully!"))
   .catch(err => console.log("❌ Render failed to connect:", err));
