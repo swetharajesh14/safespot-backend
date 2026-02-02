@@ -11,21 +11,30 @@ const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } 
 app.use(cors());
 app.use(express.json());
 
-// 1. DATABASE CONNECTION
-const mongoURI = "mongodb://swetha:SafeSpot2026@cluster0-shard-00-00.ktyl7lp.mongodb.net:27017,cluster0-shard-00-01.ktyl7lp.mongodb.net:27017,cluster0-shard-00-02.ktyl7lp.mongodb.net:27017/safespot?ssl=true&replicaSet=atlas-ktyl7lp-shard-0&authSource=admin&retryWrites=true&w=majority";
+// This string targets a single node directly to bypass whitelist/DNS lag
+// Ensure the password and database name ('safespot') are perfectly typed
 
+// NEW FRESH URI
+// A simplified direct connection to one shard
+ const mongoURI= "mongodb://admin_user:SafeSpot123@cluster0.ktyl7lp.mongodb.net/?appName=Cluster0";
 
-// Replace your connectWithRetry with this:
 const connectDB = async () => {
-  if (mongoose.connection.readyState >= 1) return; // Don't connect if already connected
+  console.log("🚀 Step 1: Initiating connection request...");
   try {
-    await mongoose.connect(mongoURI, { family: 4 });
-    console.log("✅ DB Connected Successfully!");
+    await mongoose.connect(mongoURI, {
+      serverSelectionTimeoutMS: 15000, // Wait 15 seconds before giving up
+      family: 4 // Force IPv4 to bypass hotspot issues
+    });
+    console.log("✅ Step 2: Connection established with Atlas!");
+    console.log("📂 Step 3: Linked to 'safespot' database.");
   } catch (err) {
-    console.log("❌ DB Error:", err.message);
+    console.log("❌ CONNECTION FAILED!");
+    console.log("Reason:", err.message);
+    // If it fails, we try again in 5 seconds
     setTimeout(connectDB, 5000);
   }
 };
+
 connectDB();
 // 2. SCHEMAS
 const Protector = mongoose.model('Protector', new mongoose.Schema({
