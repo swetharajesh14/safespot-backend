@@ -1,19 +1,45 @@
 import express from "express";
 import JourneyPoint from "../models/JourneyPoint.js";
-import JourneyEvent from "../models/JourneyEvent.js";
-import JourneyDay from "../models/JourneyDay.js";
 
 const router = express.Router();
 
-const haversineMeters = (lat1, lon1, lat2, lon2) => {
+/** Helpers */
+const toDateKey = (d = new Date()) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const fmtTime = (date) => {
+  const d = new Date(date);
+  let h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${String(h).padStart(2, "0")}:${m} ${ampm}`;
+};
+
+const haversineMeters = (a, b) => {
   const R = 6371000;
-  const toRad = (v) => (v * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const s1 = Math.sin(dLat / 2) ** 2;
+  const s2 = Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.asin(Math.sqrt(s1 + Math.cos(lat1) * Math.cos(lat2) * s2));
+  return R * c;
+};
+
+const formatDuration = (mins) => {
+  if (mins <= 0) return "0m";
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
 /**
@@ -22,147 +48,131 @@ const haversineMeters = (lat1, lon1, lat2, lon2) => {
  */
 router.post("/point", async (req, res) => {
   try {
-    const { userId, dateKey, ts, lat, lng, speed = 0, accuracy = 0 } = req.body;
+    const { userId, dateKey, ts, lat, lng, speed, accuracy } = req.body || {};
 
-    if (!userId || !dateKey || !ts || typeof lat !== "number" || typeof lng !== "number") {
-      return res.status(400).json({ message: "Missing/invalid fields" });
+    if (!userId || !dateKey || !ts || lat == null || lng == null) {
+      return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const pointTs = new Date(ts);
-
-    // 1) Save raw point (TTL auto)
-    await JourneyPoint.create({
+    const doc = await JourneyPoint.create({
       userId,
       dateKey,
-      ts: pointTs,
-      loc: { type: "Point", coordinates: [lng, lat] },
-      speed,
-      accuracy,
+      ts: new Date(ts),
+      lat,
+      lng,
+      speed: speed ?? 0,
+      accuracy: accuracy ?? 0,
     });
 
-    // 2) Ensure day summary exists
-    const day = await JourneyDay.findOneAndUpdate(
-      { userId, dateKey },
-      { $setOnInsert: { userId, dateKey, zonesLabel: "Mostly Safe" } },
-      { upsert: true, new: true }
-    );
-
-    // 3) Distance + active time update using last point
-    const last = await JourneyPoint.findOne({ userId, dateKey }).sort({ ts: -1 }).lean();
-
-    // NOTE: last includes the current point too because we just saved.
-    // So find previous point:
-    const prev = await JourneyPoint.findOne({ userId, dateKey, ts: { $lt: pointTs } })
-      .sort({ ts: -1 })
-      .lean();
-
-    if (prev) {
-      const [prevLng, prevLat] = prev.loc.coordinates;
-      const dist = haversineMeters(prevLat, prevLng, lat, lng);
-
-      // time delta in seconds
-      const dt = Math.max(0, (pointTs.getTime() - new Date(prev.ts).getTime()) / 1000);
-
-      // "active" if speed > 0.6 m/s OR moved more than 8m in that interval
-      const isActive = speed > 0.6 || dist > 8;
-
-      await JourneyDay.updateOne(
-        { userId, dateKey },
-        {
-          $inc: {
-            distanceMeters: dist,
-            activeSeconds: isActive ? dt : 0,
-          },
-        }
-      );
-    } else {
-      // first point of day -> START event once
-      const existingStart = await JourneyEvent.findOne({ userId, dateKey, type: "start" }).lean();
-      if (!existingStart) {
-        await JourneyEvent.create({
-          userId,
-          dateKey,
-          ts: pointTs,
-          type: "start",
-          title: "Day started",
-          subtitle: "Background tracking started",
-        });
-
-        // sessions +1 when day starts
-        await JourneyDay.updateOne({ userId, dateKey }, { $inc: { sessions: 1 } });
-      }
-    }
-
-    // 4) Create periodic MOVE event (every ~20 mins) for timeline richness
-    const twentyMinsAgo = new Date(pointTs.getTime() - 20 * 60 * 1000);
-    const recentMove = await JourneyEvent.findOne({
-      userId,
-      dateKey,
-      type: "move",
-      ts: { $gte: twentyMinsAgo },
-    }).lean();
-
-    if (!recentMove && (speed > 0.6)) {
-      await JourneyEvent.create({
-        userId,
-        dateKey,
-        ts: pointTs,
-        type: "move",
-        title: "Moving",
-        subtitle: `Speed ${speed.toFixed(1)} m/s`,
-      });
-    }
-
-    return res.json({ message: "Point saved ✅" });
-  } catch (err) {
-    console.error("POST /journey/point error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.json({ ok: true, id: doc._id });
+  } catch (e) {
+    console.log("journey/point error:", e);
+    return res.status(500).json({ message: "Failed to save point" });
   }
 });
 
 /**
- * GET /api/journey/:userId/day?date=YYYY-MM-DD
- * Returns { summary, events }
+ * GET /api/journey/:userId/today
+ * Returns: { userId, date, summary, events }
  */
-router.get("/:userId/day", async (req, res) => {
+router.get("/:userId/today", async (req, res) => {
   try {
     const { userId } = req.params;
-    const dateKey = req.query.date;
+    const dateKey = toDateKey(new Date());
 
-    if (!dateKey) return res.status(400).json({ message: "date is required" });
+    const points = await JourneyPoint.find({ userId, dateKey })
+      .sort({ ts: 1 })
+      .limit(5000)
+      .lean();
 
-    const day =
-      (await JourneyDay.findOne({ userId, dateKey }).lean()) ??
-      ({
+    if (!points.length) {
+      return res.json({
         userId,
-        dateKey,
-        activeSeconds: 0,
-        distanceMeters: 0,
-        sessions: 0,
-        flags: 0,
-        zonesLabel: "No data yet",
+        date: dateKey,
+        summary: { activeTime: "0m", distance: "0.0 km", sessions: "0", zones: "No data yet" },
+        events: [],
       });
+    }
 
-    const events = await JourneyEvent.find({ userId, dateKey }).sort({ ts: 1 }).lean();
+    // distance
+    let distM = 0;
+    for (let i = 1; i < points.length; i++) {
+      distM += haversineMeters(points[i - 1], points[i]);
+    }
 
-    // format for your UI
-    const summary = {
-      activeTime: `${Math.floor(day.activeSeconds / 60)}m`,
-      distance: `${(day.distanceMeters / 1000).toFixed(1)} km`,
-      sessions: String(day.sessions),
-      zones: day.zonesLabel,
-    };
+    // active time (simple): count minutes where speed >= 0.5 m/s OR moved > 15m between samples
+    let activeMinutes = 0;
+    for (let i = 1; i < points.length; i++) {
+      const dtMin = (new Date(points[i].ts) - new Date(points[i - 1].ts)) / 60000;
+      if (dtMin <= 0) continue;
 
-    const formattedEvents = events.map((e) => {
-      const t = new Date(e.ts);
-      const time = t.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-      return { time, title: e.title, subtitle: e.subtitle, type: e.type };
+      const moved = haversineMeters(points[i - 1], points[i]);
+      const moving = (points[i].speed ?? 0) >= 0.5 || moved >= 15;
+      if (moving) activeMinutes += Math.min(dtMin, 5); // cap spikes
+    }
+
+    // events (simple & clean)
+    const first = points[0];
+    const last = points[points.length - 1];
+
+    const events = [];
+    events.push({
+      time: fmtTime(first.ts),
+      title: "Started tracking",
+      subtitle: `Accuracy ~${Math.round(first.accuracy ?? 0)}m`,
+      type: "start",
     });
 
-    return res.json({ summary, events: formattedEvents });
-  } catch (err) {
-    console.error("GET /journey/day error:", err);
-    return res.status(500).json({ message: "Server error" });
+    // detect idle segments (no movement for >= 10 minutes)
+    let idleStartIdx = null;
+    for (let i = 1; i < points.length; i++) {
+      const moved = haversineMeters(points[i - 1], points[i]);
+      const dtMin = (new Date(points[i].ts) - new Date(points[i - 1].ts)) / 60000;
+
+      const idle = moved < 8 && (points[i].speed ?? 0) < 0.3; // roughly stationary
+      if (idle && idleStartIdx === null) idleStartIdx = i - 1;
+
+      if ((!idle || i === points.length - 1) && idleStartIdx !== null) {
+        const startTs = new Date(points[idleStartIdx].ts);
+        const endTs = new Date(points[i].ts);
+        const idleMins = (endTs - startTs) / 60000;
+
+        if (idleMins >= 10) {
+          events.push({
+            time: fmtTime(startTs),
+            title: "Long idle",
+            subtitle: `Stationary • ${Math.round(idleMins)} mins`,
+            type: "idle",
+          });
+        }
+        idleStartIdx = null;
+      }
+    }
+
+    events.push({
+      time: fmtTime(last.ts),
+      title: "Tracking updated",
+      subtitle: "Latest location received",
+      type: "end",
+    });
+
+    // zones (placeholder logic)
+    const zones = distM > 2000 ? "Normal day" : "Low movement";
+
+    return res.json({
+      userId,
+      date: dateKey,
+      summary: {
+        activeTime: formatDuration(activeMinutes),
+        distance: `${(distM / 1000).toFixed(1)} km`,
+        sessions: "1",
+        zones,
+      },
+      events,
+    });
+  } catch (e) {
+    console.log("journey/today error:", e);
+    return res.status(500).json({ message: "Failed to load today journey" });
   }
 });
 
