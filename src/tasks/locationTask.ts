@@ -1,77 +1,42 @@
 import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
 
-const TASK_NAME = "SAFE_SPOT_BG_LOCATION_TASK";
-const API_URL = "https://safespot-backend-vx2w.onrender.com";
-const USER_ID = "Swetha_01";
+const LOCATION_TASK_NAME = "background-location-task";
 
-const getDateKey = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-};
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+  if (error) {
+    console.log("❌ Background location error:", error);
+    return;
+  }
 
-TaskManager.defineTask(TASK_NAME, async ({ data, error }) => {
+  if (!data) return;
+
+  const { locations } = data as { locations: Location.LocationObject[] };
+  if (!locations || locations.length === 0) return;
+
+  const coords = locations[0].coords;
+
+  const latitude = coords.latitude;
+  const longitude = coords.longitude;
+  const speed = coords.speed ?? 0;
+  const accuracy = coords.accuracy ?? 0;
+
   try {
-    if (error) {
-      console.log("BG Task error:", error);
-      return;
-    }
-    const locations = (data as any)?.locations as Location.LocationObject[] | undefined;
-    if (!locations || locations.length === 0) return;
-
-    const loc = locations[0];
-    const { latitude, longitude, speed, accuracy } = loc.coords;
-
-    await fetch(`${API_URL}/api/journey/point`, {
+    await fetch("http://192.168.1.16:10000/api/journey/point", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userId: USER_ID,
-        dateKey: getDateKey(),
-        ts: new Date(loc.timestamp).toISOString(),
+        userId: "Swetha_01",
+        ts: new Date().toISOString(),
         lat: latitude,
         lng: longitude,
-        speed: speed ?? 0,
-        accuracy: accuracy ?? 0,
+        speed,
+        accuracy,
       }),
     });
-  } catch (e) {
-    console.log("BG send error:", e);
+
+    console.log("📍 Location sent:", latitude, longitude);
+  } catch (err) {
+    console.log("❌ Failed to send location:", err);
   }
 });
-
-export const startJourneyTracking = async () => {
-  const fg = await Location.requestForegroundPermissionsAsync();
-  if (fg.status !== "granted") throw new Error("Foreground permission not granted");
-
-  const bg = await Location.requestBackgroundPermissionsAsync();
-  if (bg.status !== "granted") throw new Error("Background permission not granted");
-
-  const started = await Location.hasStartedLocationUpdatesAsync(TASK_NAME);
-  if (started) return;
-
-  await Location.startLocationUpdatesAsync(TASK_NAME, {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: 60_000, // 1 minute
-    distanceInterval: 30, // 30 meters
-    showsBackgroundLocationIndicator: false,
-    pausesUpdatesAutomatically: true,
-    foregroundService: {
-      notificationTitle: "SafeSpot is tracking",
-      notificationBody: "Journey tracking is active",
-    },
-  });
-};
-
-export const stopJourneyTracking = async () => {
-  const started = await Location.hasStartedLocationUpdatesAsync(TASK_NAME);
-  if (!started) return;
-  await Location.stopLocationUpdatesAsync(TASK_NAME);
-};
-
-export const isJourneyTrackingOn = async () => {
-  return await Location.hasStartedLocationUpdatesAsync(TASK_NAME);
-};
