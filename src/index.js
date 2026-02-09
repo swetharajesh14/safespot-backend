@@ -41,6 +41,9 @@ import userRoutes from "./routes/user.routes.js";
 import protectorsRoutes from "./routes/protectors.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import journeyRoutes from "./routes/journey.routes.js"; // ✅ ADD
+import historyRoutes from "./routes/history.routes.js";
+import analyticsRoutes from "./routes/analytics.routes.js";
+
 
 dotenv.config();
 
@@ -55,12 +58,29 @@ app.use("/api/user", userRoutes);
 app.use("/api/protectors", protectorsRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/journey", journeyRoutes); // ✅ ADD
+app.use("/api/history", historyRoutes);
+app.use("/api/analytics", analyticsRoutes);
+
+
 
 app.get("/", (req, res) => {
   res.send("SafeSpot backend is running ✅");
 });
 
+import http from "http";
+import { Server } from "socket.io";
+
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, "0.0.0.0", () => {
+
+const server = http.createServer(app);
+
+export const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

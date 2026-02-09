@@ -30,4 +30,24 @@ router.post("/", async (req, res) => {
   }
 });
 
+/**
+ * DELETE protector by id
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deleted = await Protector.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({ message: "Protector not found" });
+    }
+
+    res.json({ ok: true, message: "Protector removed successfully" });
+  } catch (err) {
+    console.error("❌ Delete protector error:", err);
+    res.status(500).json({ message: "Failed to delete protector" });
+  }
+});
+
 export default router;
