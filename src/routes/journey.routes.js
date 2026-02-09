@@ -3,14 +3,11 @@ import JourneyPoint from "../models/JourneyPoint.js";
 
 const router = express.Router();
 
-/** ✅ Ping (confirm route is mounted) */
-router.get("/ping", (req, res) => {
-  res.json({ ok: true, message: "journey routes working ✅" });
-});
-router.get("/routes-check", (req, res) => {
-  res.json({ ok: true, hasPointPost: true });
-});
-/** ✅ IST dateKey helper (YYYY-MM-DD) */
+/* =========================
+   HELPERS
+========================= */
+
+/** IST dateKey (YYYY-MM-DD) */
 const getTodayDateKey = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -22,10 +19,11 @@ const getTodayDateKey = () => {
   const y = parts.find(p => p.type === "year").value;
   const m = parts.find(p => p.type === "month").value;
   const d = parts.find(p => p.type === "day").value;
-  return `${y}-${m}-${d}`; // YYYY-MM-DD
+  return `${y}-${m}-${d}`;
 };
-/** ✅ Haversine distance (meters) */
-const toRad = (v) => (v * Math.PI) / 180; 
+
+/** Haversine distance (meters) */
+const toRad = v => (v * Math.PI) / 180;
 const haversineMeters = (a, b) => {
   const R = 6371000;
   const dLat = toRad(b.lat - a.lat);
@@ -40,18 +38,23 @@ const haversineMeters = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
-/** ✅ Format time for timeline */
-const fmtTime = (d) =>
+/** Format time */
+const fmtTime = d =>
   new Date(d).toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
   });
 
-/**
- * ✅ 1) SAVE POINT
- * POST /api/journey/point
- * Body: { userId, dateKey?, ts, lat, lng, speed?, accuracy? }
- */
+/* =========================
+   ROUTES
+========================= */
+
+/** Ping */
+router.get("/ping", (_, res) => {
+  res.json({ ok: true, message: "journey routes working ✅" });
+});
+
+/** 1️⃣ SAVE POINT */
 router.post("/point", async (req, res) => {
   try {
     const { userId, dateKey, ts, lat, lng, speed, accuracy } = req.body;
@@ -59,7 +62,7 @@ router.post("/point", async (req, res) => {
     if (!userId || !ts || lat === undefined || lng === undefined) {
       return res.status(400).json({
         ok: false,
-        message: "Missing required fields: userId, ts, lat, lng",
+        message: "Missing required fields",
       });
     }
 
@@ -71,23 +74,20 @@ router.post("/point", async (req, res) => {
       ts: new Date(ts),
       loc: {
         type: "Point",
-        coordinates: [Number(lng), Number(lat)], // [lng, lat]
+        coordinates: [Number(lng), Number(lat)],
       },
       speed: Number(speed ?? 0),
       accuracy: Number(accuracy ?? 0),
     });
 
-    return res.json({ ok: true, message: "Point saved ✅", id: doc._id });
+    res.json({ ok: true, message: "Point saved ✅", id: doc._id });
   } catch (err) {
-    console.log("POST /api/journey/point error:", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
+    console.log("POST /point error:", err);
+    res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
-/**
- * ✅ 2) DEBUG: GET today raw points
- * GET /api/journey/points/:userId/today
- */
+/** 2️⃣ RAW POINTS (today) */
 router.get("/points/:userId/today", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -95,49 +95,47 @@ router.get("/points/:userId/today", async (req, res) => {
 
     const points = await JourneyPoint.find({ userId, dateKey })
       .sort({ ts: 1 })
-      .limit(2000);
+      .limit(3000);
 
-    res.json({
-      ok: true,
-      userId,
-      dateKey,
-      count: points.length,
-      points,
-    });
+    res.json({ ok: true, userId, dateKey, count: points.length, points });
   } catch (err) {
-    console.log("GET /api/journey/points/:userId/today error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    res.status(500).json({ ok: false });
   }
 });
 
-/**
- * ✅ 3) DEBUG: GET latest points (any date) - optional helper
- * GET /api/journey/points/:userId
- */
-router.get("/points/:userId", async (req, res) => {
+/** 3️⃣ TODAY STATUS */
+router.get("/:userId/today/status", async (req, res) => {
   try {
     const { userId } = req.params;
+    const dateKey = getTodayDateKey();
 
-    const points = await JourneyPoint.find({ userId })
-      .sort({ ts: -1 })
-      .limit(200);
+    const last = await JourneyPoint.findOne({ userId, dateKey }).sort({ ts: -1 });
+
+    if (!last) {
+      return res.json({ ok: true, status: "STOPPED", lastTs: null });
+    }
+
+    const diffMin = (Date.now() - new Date(last.ts).getTime()) / 60000;
+    const speed = Number(last.speed ?? 0);
+
+    let status = "IDLE";
+    if (diffMin > 10) status = "STOPPED";
+    else if (speed > 0.8) status = "MOVING";
 
     res.json({
       ok: true,
-      userId,
-      count: points.length,
-      points,
+      status,
+      lastTs: last.ts,
+      lastLat: last.loc.coordinates[1],
+      lastLng: last.loc.coordinates[0],
     });
   } catch (err) {
-    console.log("GET /api/journey/points/:userId error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    console.log("STATUS error:", err);
+    res.status(500).json({ ok: false });
   }
 });
 
-/**
- * ✅ 4) REAL TODAY SUMMARY (used by Journey UI)
- * GET /api/journey/:userId/today
- */
+/** 4️⃣ TODAY SUMMARY + TIMELINE */
 router.get("/:userId/today", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -161,22 +159,18 @@ router.get("/:userId/today", async (req, res) => {
       });
     }
 
-    // ---- Compute summary ----
     let distanceM = 0;
     let activeMs = 0;
-
-    const moveThresholdM = 10; // ignore GPS noise under 10m
-    const sessionGapMs = 10 * 60 * 1000; // 10 min gap => new session
-
     let sessions = 1;
-    let lastTs = points[0].ts;
 
     const events = [];
+    const sessionGapMs = 10 * 60 * 1000;
+    const moveThresholdM = 10;
 
     events.push({
       time: fmtTime(points[0].ts),
       title: "Started tracking",
-      subtitle: "Tracking began",
+      subtitle: "Journey started",
       type: "start",
     });
 
@@ -184,49 +178,37 @@ router.get("/:userId/today", async (req, res) => {
       const prev = points[i - 1];
       const cur = points[i];
 
-      const prevCoord = {
-        lat: prev.loc.coordinates[1],
-        lng: prev.loc.coordinates[0],
-      };
-      const curCoord = {
-        lat: cur.loc.coordinates[1],
-        lng: cur.loc.coordinates[0],
-      };
+      const prevCoord = { lat: prev.loc.coordinates[1], lng: prev.loc.coordinates[0] };
+      const curCoord = { lat: cur.loc.coordinates[1], lng: cur.loc.coordinates[0] };
 
       const dM = haversineMeters(prevCoord, curCoord);
-      const dt = new Date(cur.ts).getTime() - new Date(prev.ts).getTime();
+      const dt = new Date(cur.ts) - new Date(prev.ts);
 
-      // new session if gap is large
       if (dt > sessionGapMs) {
-        sessions += 1;
+        sessions++;
         events.push({
           time: fmtTime(cur.ts),
-          title: "New session started",
+          title: "New session",
           subtitle: "Long gap detected",
           type: "start",
         });
       }
 
-      // count movement only if beyond noise
-      if (dM >= moveThresholdM && dt > 0 && dt < 30 * 60 * 1000) {
+      if (dM >= moveThresholdM && dt > 0) {
         distanceM += dM;
         activeMs += dt;
       }
-
-      lastTs = cur.ts;
     }
 
     events.push({
-      time: fmtTime(lastTs),
+      time: fmtTime(points.at(-1).ts),
       title: "Last updated",
-      subtitle: "Most recent location point",
+      subtitle: "Latest location point",
       type: "end",
     });
 
-    // ---- Format outputs ----
     const km = distanceM / 1000;
     const mins = Math.round(activeMs / 60000);
-
     const activeTime =
       mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
 
@@ -242,10 +224,11 @@ router.get("/:userId/today", async (req, res) => {
       events,
     });
   } catch (err) {
-    console.log("GET /api/journey/:userId/today error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    console.log("SUMMARY error:", err);
+    res.status(500).json({ ok: false });
   }
 });
-console.log("✅ journey.routes.js loaded at", new Date().toISOString());
+
+console.log("✅ journey.routes.js loaded");
 
 export default router;
