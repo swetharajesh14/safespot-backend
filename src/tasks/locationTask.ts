@@ -22,7 +22,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   const accuracy = coords.accuracy ?? 0;
 
   try {
-    await fetch("http://192.168.1.16:10000/api/journey/point", {
+    await fetch("https://safespot-backend-vx2w.onrender.com/api/journey/point", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
