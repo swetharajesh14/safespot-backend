@@ -58,6 +58,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/protectors", protectorsRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/journey", journeyRoutes); // ✅ ADD
+
 app.use("/api/history", historyRoutes);
 app.use("/api/analytics", analyticsRoutes);
 
@@ -71,6 +72,7 @@ import http from "http";
 import { Server } from "socket.io";
 
 const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("Server running on", PORT));
 
 const server = http.createServer(app);
 
