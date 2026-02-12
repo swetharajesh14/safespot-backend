@@ -336,5 +336,31 @@ router.get("/:userId/summary/month", async (req, res) => {
     res.status(500).json({ ok: false, message: err.message || "Server error" });
   }
 });
+/* =====================================
+   🚨 FORCE ABNORMAL TEST ROUTE
+   GET /api/history/test/abnormal
+===================================== */
+router.get("/test/abnormal", async (req, res) => {
+  try {
+    const log = new History({
+      userId: "Swetha_01",
+      latitude: 9.9399758,
+      longitude: 78.1205106,
+      speed: 5,
+      accelX: 5,
+      accelY: 5,
+      accelZ: 5,
+      intensity: "High-intensity",
+      isAbnormal: true,
+      timestamp: new Date(),
+    });
+
+    await log.save();
+
+    res.json({ ok: true, message: "🔥 Abnormal test log inserted" });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
 
 export default router;
