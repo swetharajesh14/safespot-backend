@@ -71,9 +71,6 @@ app.get("/", (req, res) => {
 import http from "http";
 import { Server } from "socket.io";
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("Server running on", PORT));
-
 const server = http.createServer(app);
 
 export const io = new Server(server, {
@@ -82,6 +79,8 @@ export const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
+
+const PORT = process.env.PORT || 10000;
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
