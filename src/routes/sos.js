@@ -1,6 +1,5 @@
 import express from "express";
 import Protector from "../models/Protector.js"; // change path if your model is inside index.js
-import * as Location from "expo-location"; // (REMOVE if not used)
 import fetch from "node-fetch"; // only if using node<18, otherwise remove
 
 const router = express.Router();
