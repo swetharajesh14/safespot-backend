@@ -8,21 +8,6 @@ router.get("/ping", (req, res) =>
   res.json({ ok: true, message: "history route working ✅" })
 );
 
-/** ✅ summary-check (for testing) */
-router.get("/summary-check", (req, res) => {
-  res.json({ ok: true, day: true, week: true, month: true });
-});
-
-/** ✅ routes-check (for testing) */
-router.get("/routes-check", (req, res) => {
-  res.json({
-    ok: true,
-    latest: true,
-    abnormal: true,
-    summary: { day: true, week: true, month: true },
-  });
-});
-
 /** ✅ IST Helpers */
 const IST_TZ = "Asia/Kolkata";
 
@@ -45,7 +30,6 @@ const getISTDateKey = (date = new Date()) => {
  * ✅ UTC range for IST dateKey:
  * start = YYYY-MM-DD 00:00 IST
  * end   = next day 00:00 IST
- * Use { $gte: start, $lt: end } (no duplicates)
  */
 const rangeForISTDateKey = (dateKey) => {
   const start = new Date(`${dateKey}T00:00:00+05:30`);
@@ -98,8 +82,7 @@ const computeMetricsFromLogs = (logs) => {
   const abnormalCount = logs.filter((l) => l.isAbnormal).length;
   const stability = Math.max(0, Math.round(100 - (abnormalCount / total) * 100));
 
-  const avgSpeed =
-    logs.reduce((s, l) => s + Number(l.speed ?? 0), 0) / total;
+  const avgSpeed = logs.reduce((s, l) => s + Number(l.speed ?? 0), 0) / total;
 
   // Intensity mode (most frequent)
   const freq = {};
@@ -110,39 +93,29 @@ const computeMetricsFromLogs = (logs) => {
   const intensity =
     Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] || "Idle";
 
-  // Active logs: not Idle OR speed > 0.2
+  // Active logs
   const activeLogs = logs.filter(
     (l) => (l.intensity && l.intensity !== "Idle") || Number(l.speed ?? 0) > 0.2
   );
 
-  // Active minutes estimate using time span of active logs (better than active.length/2)
   let activeMins = 0;
   if (activeLogs.length >= 2) {
     const first = new Date(activeLogs[0].timestamp).getTime();
     const last = new Date(activeLogs[activeLogs.length - 1].timestamp).getTime();
-    const ms = Math.max(0, last - first);
-    activeMins = Math.round(ms / 60000);
+    activeMins = Math.round(Math.max(0, last - first) / 60000);
   } else if (activeLogs.length === 1) {
-    activeMins = 1; // at least 1 minute if one active log exists
+    activeMins = 1;
   }
 
-  return {
-    activeMins,
-    avgSpeed,
-    stability,
-    intensity,
-    abnormalCount,
-    total,
-  };
+  return { activeMins, avgSpeed, stability, intensity, abnormalCount, total };
 };
 
 const fmtActive = (mins) =>
   mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins} mins`;
-
 const fmtSpeed = (v) => `${Number(v || 0).toFixed(1)} m/s`;
 
 /**
- * ✅ POST /api/history (save log)
+ * ✅ POST /api/history
  */
 router.post("/", async (req, res) => {
   try {
@@ -172,42 +145,17 @@ router.post("/", async (req, res) => {
 
 /**
  * ✅ GET latest logs
- * GET /api/history/:userId/latest?limit=50
  */
 router.get("/:userId/latest", async (req, res) => {
   try {
     const { userId } = req.params;
     const limit = Math.min(Number(req.query.limit || 50), 200);
 
-    const logs = await History.find({ userId })
-      .sort({ timestamp: -1 })
-      .limit(limit);
+    const logs = await History.find({ userId }).sort({ timestamp: -1 }).limit(limit);
 
     res.json({ ok: true, userId, count: logs.length, logs });
   } catch (err) {
-    res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
- * ✅ GET abnormal today
- * GET /api/history/:userId/abnormal/today
- */
-router.get("/:userId/abnormal/today", async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const dateKey = getISTDateKey(new Date());
-    const { start, end } = rangeForISTDateKey(dateKey);
-
-    const logs = await History.find({
-      userId,
-      isAbnormal: true,
-      timestamp: { $gte: start, $lt: end },
-    }).sort({ timestamp: -1 });
-
-    res.json({ ok: true, userId, dateKey, count: logs.length, logs });
-  } catch (err) {
-    res.status(500).json({ ok: false, message: "Server error" });
+    res.status(500).json({ ok: false, message: err.message || "Server error" });
   }
 });
 
@@ -251,7 +199,7 @@ router.get("/:userId/summary/day", async (req, res) => {
     });
   } catch (err) {
     console.log("DAY summary error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    res.status(500).json({ ok: false, message: err.message || "Server error" });
   }
 });
 
@@ -264,17 +212,17 @@ router.get("/:userId/summary/week", async (req, res) => {
     const { userId } = req.params;
     const keys = getWeekDateKeysEndingToday();
 
-    const { start } = rangeForISTDateKey(keys[0]);
-    const { end } = rangeForISTDateKey(keys[keys.length - 1]);
+    // ✅ correct: range from first day start -> last day end
+    const firstRange = rangeForISTDateKey(keys[0]);
+    const lastRange = rangeForISTDateKey(keys[keys.length - 1]);
 
     const logs = await History.find({
       userId,
-      timestamp: { $gte: start, $lt: end },
+      timestamp: { $gte: firstRange.start, $lt: lastRange.end },
     }).sort({ timestamp: 1 });
 
-    // group by dateKey
-    const map = {};
-    for (const k of keys) map[k] = [];
+    // group by dateKey, ensure all 7 exist
+    const map = Object.fromEntries(keys.map((k) => [k, []]));
 
     for (const l of logs) {
       const k = getISTDateKey(new Date(l.timestamp));
@@ -294,35 +242,33 @@ router.get("/:userId/summary/week", async (req, res) => {
       };
     });
 
+    // ✅ cards based on totals (not avg) - looks better
+    const totalActive = series.reduce((s, x) => s + x.activeMins, 0);
     const avgSpeed =
       series.reduce((s, x) => s + x.avgSpeed, 0) / (series.length || 1);
-    const avgActive = Math.round(
-      series.reduce((s, x) => s + x.activeMins, 0) / (series.length || 1)
-    );
-    const avgStability = Math.round(
-      series.reduce((s, x) => s + x.stability, 0) / (series.length || 1)
-    );
+    const avgStability =
+      series.reduce((s, x) => s + x.stability, 0) / (series.length || 1);
 
     res.json({
       ok: true,
       range: "week",
       dateKeys: keys,
       cards: {
-        activeTime: fmtActive(avgActive),
+        activeTime: fmtActive(totalActive),
         avgSpeed: fmtSpeed(avgSpeed),
-        stability: `${avgStability}%`,
-        intensity: "Weekly Avg",
+        stability: `${Math.round(avgStability)}%`,
+        intensity: "Week",
       },
       series,
     });
   } catch (err) {
     console.log("WEEK summary error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    res.status(500).json({ ok: false, message: err.message || "Server error" });
   }
 });
 
 /**
- * ✅ SUMMARY: MONTH (current month by default)
+ * ✅ SUMMARY: MONTH
  * GET /api/history/:userId/summary/month?year=2026&month=2
  */
 router.get("/:userId/summary/month", async (req, res) => {
@@ -337,16 +283,15 @@ router.get("/:userId/summary/month", async (req, res) => {
 
     const keys = getMonthDateKeys(year, month);
 
-    const { start } = rangeForISTDateKey(keys[0]);
-    const { end } = rangeForISTDateKey(keys[keys.length - 1]);
+    const firstRange = rangeForISTDateKey(keys[0]);
+    const lastRange = rangeForISTDateKey(keys[keys.length - 1]);
 
     const logs = await History.find({
       userId,
-      timestamp: { $gte: start, $lt: end },
+      timestamp: { $gte: firstRange.start, $lt: lastRange.end },
     }).sort({ timestamp: 1 });
 
-    const map = {};
-    for (const k of keys) map[k] = [];
+    const map = Object.fromEntries(keys.map((k) => [k, []]));
 
     for (const l of logs) {
       const k = getISTDateKey(new Date(l.timestamp));
@@ -366,14 +311,11 @@ router.get("/:userId/summary/month", async (req, res) => {
       };
     });
 
+    const totalActive = series.reduce((s, x) => s + x.activeMins, 0);
     const avgSpeed =
       series.reduce((s, x) => s + x.avgSpeed, 0) / (series.length || 1);
-    const avgActive = Math.round(
-      series.reduce((s, x) => s + x.activeMins, 0) / (series.length || 1)
-    );
-    const avgStability = Math.round(
-      series.reduce((s, x) => s + x.stability, 0) / (series.length || 1)
-    );
+    const avgStability =
+      series.reduce((s, x) => s + x.stability, 0) / (series.length || 1);
 
     res.json({
       ok: true,
@@ -382,16 +324,16 @@ router.get("/:userId/summary/month", async (req, res) => {
       month,
       dateKeys: keys,
       cards: {
-        activeTime: fmtActive(avgActive),
+        activeTime: fmtActive(totalActive),
         avgSpeed: fmtSpeed(avgSpeed),
-        stability: `${avgStability}%`,
-        intensity: "Monthly Avg",
+        stability: `${Math.round(avgStability)}%`,
+        intensity: "Month",
       },
       series,
     });
   } catch (err) {
     console.log("MONTH summary error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    res.status(500).json({ ok: false, message: err.message || "Server error" });
   }
 });
 
