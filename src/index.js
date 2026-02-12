@@ -43,6 +43,7 @@ import uploadRoutes from "./routes/upload.routes.js";
 import journeyRoutes from "./routes/journey.routes.js"; // ✅ ADD
 import historyRoutes from "./routes/history.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
+import sosRouter from "./routes/sos.js";
 
 
 dotenv.config();
@@ -61,7 +62,7 @@ app.use("/api/journey", journeyRoutes); // ✅ ADD
 
 app.use("/api/history", historyRoutes);
 app.use("/api/analytics", analyticsRoutes);
-
+app.use("/api/sos", sosRouter);
 
 
 app.get("/", (req, res) => {
